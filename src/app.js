@@ -1,7 +1,7 @@
 import { icon, hydrateIcons } from './icons.js';
 import { db } from './db.js';
 import { auth, PACKS, SIGNUP_BONUS } from './auth.js';
-import { RATIOS, listModels, customModels, saveCustomModels, generateImage } from './providers.js';
+import { RATIOS, listModels, customModels, saveCustomModels, generateImage, drawArt } from './providers.js';
 
 /* ============================== helpers ============================== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -156,7 +156,7 @@ function ensureVisible(list) {
 
 /* ============================== rendering ============================== */
 let rafId = 0;
-function render() { if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; renderNodes(); renderEdges(); drawMinimap(); $('#empty').style.opacity = nodes.length ? 0 : 1; }); }
+function render() { if (!rafId) rafId = requestAnimationFrame(() => { rafId = 0; renderNodes(); renderEdges(); drawMinimap(); $('#empty').hidden = nodes.length > 0; }); }
 
 function makeNodeEl(n) {
   const el = document.createElement('div'); el.dataset.id = n.id;
@@ -374,7 +374,7 @@ function variantOf(n) {
 let drag = null;
 stage.addEventListener('pointerdown', (e) => {
   closeMenu();
-  if (e.target.closest('.bar')) return;
+  if (e.target.closest('.bar') || e.target.closest('.recipes')) return;
   if (e.target.closest('.txt')?.isContentEditable) return;
   stage.focus({ preventScroll: true }); if (document.activeElement !== stage) document.activeElement?.blur?.();
   const pan = e.button === 1 || tool === 'hand' || spaceHeld;
@@ -502,14 +502,45 @@ promptEl.addEventListener('keydown', (e) => {
 $('#btnGen').onclick = submitDock;
 function fillDockSelects() {
   const ms = listModels(); if (!ms.some((m) => m.id === dockState.model)) dockState.model = ms[0].id;
-  $('#selModel').innerHTML = ms.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}  ·  ${m.cost}/张</option>`).join('');
-  $('#selModel').value = dockState.model;
+  $('#modelName').textContent = modelById(dockState.model).name;
   $('#selRatio').innerHTML = Object.keys(RATIOS).map((r) => `<option>${r}</option>`).join(''); $('#selRatio').value = dockState.ratio;
 }
-$('#selModel').onchange = (e) => { dockState.model = e.target.value; LS.set('huabu.dock', dockState); updateDock(); };
+function closeModelPop() { $('#mpop').hidden = true; }
+function openModelPop() {
+  const pop = $('#mpop'); pop.hidden = false;
+  pop.innerHTML = `<input placeholder="搜索模型…" id="mq" spellcheck="false"><div class="list" id="mlist"></div><div class="foot"><button id="mManage">+ 接入我的模型 API</button></div>`;
+  const draw = () => {
+    const q = $('#mq').value.trim().toLowerCase();
+    $('#mlist').innerHTML = listModels().filter((m) => !q || (m.name + m.desc + (m.model || '')).toLowerCase().includes(q)).map((m) =>
+      `<button class="mi ${m.id === dockState.model ? 'on' : ''}" data-id="${esc(m.id)}"><span class="dot"></span><span class="t"><b>${esc(m.name)}</b><small>${esc(m.desc)}</small></span><em>${m.cost} 算力/张</em></button>`).join('') || '<p style="color:var(--mute);padding:12px">没有匹配的模型</p>';
+  };
+  draw(); $('#mq').oninput = draw; $('#mq').focus();
+  $('#mlist').onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; dockState.model = b.dataset.id; LS.set('huabu.dock', dockState); fillDockSelects(); updateDock(); closeModelPop(); };
+  $('#mManage').onclick = () => { closeModelPop(); openSettings('models'); };
+}
+$('#modelBtn').onclick = () => ($('#mpop').hidden ? openModelPop() : closeModelPop());
+document.addEventListener('pointerdown', (e) => { if (!$('#mpop').hidden && !e.target.closest('#mpop') && !e.target.closest('#modelBtn')) closeModelPop(); }, true);
 $('#selRatio').onchange = (e) => { dockState.ratio = e.target.value; LS.set('huabu.dock', dockState); };
 $('#nDec').onclick = () => { dockState.n = clamp(dockState.n - 1, 1, 4); LS.set('huabu.dock', dockState); updateDock(); };
 $('#nInc').onclick = () => { dockState.n = clamp(dockState.n + 1, 1, 4); LS.set('huabu.dock', dockState); updateDock(); };
+
+/* ============================== inspiration recipes ============================== */
+const RECIPES = [
+  ['雨夜霓虹街头', '赛博朋克风格的雨夜东京街头，霓虹灯倒映在湿润的路面，电影感', '16:9'],
+  ['极简产品海报', '极简风格的香水瓶产品海报，柔和渐变背景，高级质感，留白构图', '3:4'],
+  ['治愈系插画', '治愈系水彩插画，一只橘猫趴在窗台晒太阳，暖色调，柔和光线', '1:1'],
+  ['未来感角色设定', '未来机能风少女角色设定图，银白色外骨骼，冷色调，细节丰富', '2:3'],
+  ['东方山水', '中国水墨山水长卷，云雾缭绕的群山，留白意境，淡雅', '16:9'],
+  ['3D 等距小屋', '3D 等距视角的可爱小木屋，圆润建模，柔和光影，粉彩配色', '1:1'],
+];
+function renderRecipes() {
+  const box = $('#recipes'); if (!box || box.dataset.ready) return; box.dataset.ready = 1;
+  box.innerHTML = RECIPES.map(([t, p, r], i) => `<button class="recipe" data-i="${i}"><div class="th" style="background-image:url('${drawArt(p, 300, 200, i + 7, false)}')"></div><div class="tx"><b>${t}</b><small>${r} · 点击使用</small></div></button>`).join('');
+  box.onclick = (e) => {
+    const b = e.target.closest('.recipe'); if (!b) return; const [, p, r] = RECIPES[+b.dataset.i];
+    promptEl.value = p; autogrow(); dockState.ratio = r; $('#selRatio').value = r; LS.set('huabu.dock', dockState); promptEl.focus();
+  };
+}
 
 /* ============================== top bar ============================== */
 $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo;
@@ -557,7 +588,7 @@ async function openRecharge() {
   });
 }
 
-function openSettings() {
+function openSettings(tab = 'pref') {
   openModal('设置', `<div class="tabs"><button class="on" data-t="pref">偏好</button><button data-t="models">模型接入</button></div><div id="stBody"></div>`, (body) => {
     const host = $('#stBody', body);
     const pref = () => {
@@ -582,7 +613,7 @@ function openSettings() {
         l.push(m); saveCustomModels(l); fillDockSelects(); updateDock(); toast('已添加', 'ok'); models();
       };
     };
-    pref();
+    body.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x.dataset.t === tab)); tab === 'models' ? models() : pref();
     body.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => { body.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b)); b.dataset.t === 'pref' ? pref() : models(); }));
   });
 }
@@ -635,7 +666,7 @@ async function doLogout() {
 async function enterApp() {
   $('#auth').hidden = true; $('#app').hidden = false;
   $('#btnUser').textContent = (user.name || '?').slice(0, 1).toUpperCase(); setCredits();
-  fillDockSelects(); updateDock(); setTool('select'); setTheme(document.documentElement.dataset.theme);
+  fillDockSelects(); updateDock(); renderRecipes(); setTool('select'); setTheme(document.documentElement.dataset.theme);
   const list = (await db.byUser(user.id)).sort((a, b) => b.updated - a.updated);
   const last = LS.get('huabu.last.' + user.id); const pick = list.find((p) => p.id === last) || list[0];
   pick ? await openProject(pick.id) : await newProject();

@@ -46,9 +46,9 @@ try { var t = localStorage.getItem('huabu.theme'); if (t) document.documentEleme
     </div>
     <div id="marquee" hidden></div>
     <div id="empty">
-      <div class="empty-ico"><i data-i="sparkle" data-s="26"></i></div>
-      <h3>在下方输入想法，开始创作</h3>
-      <p>或把图片拖进来 · 双击画布添加便签</p>
+      <h3>把一句话，变成一张画</h3>
+      <p>在下方输入想法，或从灵感案例开始 · 也可把图片拖进来</p>
+      <div class="recipes" id="recipes"></div>
     </div>
   </main>
 
@@ -90,11 +90,12 @@ try { var t = localStorage.getItem('huabu.theme'); if (t) document.documentEleme
   <canvas id="minimap" width="176" height="116" title="小地图"></canvas>
 
   <section class="dock" id="dock">
+    <div class="mpop" id="mpop" hidden></div>
     <div class="refs" id="refs" hidden></div>
     <textarea id="prompt" rows="1" placeholder="描述你想生成的画面…" spellcheck="false"></textarea>
     <div class="dock-row">
       <div class="opts">
-        <label class="sel"><i data-i="sparkle" data-s="15"></i><select id="selModel"></select></label>
+        <button type="button" class="sel modelbtn" id="modelBtn" data-menu><i data-i="sparkle" data-s="15"></i><span id="modelName">Aurora</span><i data-i="chevron" data-s="14"></i></button>
         <label class="sel"><select id="selRatio"></select></label>
         <div class="stepper" title="一次生成的张数">
           <button type="button" id="nDec">−</button><span id="nVal">1 张</span><button type="button" id="nInc">+</button>
