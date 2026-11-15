@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Huabu 画布 · AI 图片创作</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236d5efc'/%3E%3Cstop offset='1' stop-color='%23ff7ab6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="src/styles.css">
+<script>window.HUABU_CONFIG = window.HUABU_CONFIG || {}; /* 对接后端: { apiBase: 'https://api.example.com' } */
+try { var t = localStorage.getItem('huabu.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body>
+
+<!-- ============ 登录 / 注册 ============ -->
+<section id="auth" hidden>
+  <div class="auth-hero">
+    <div class="brand"><span class="logo"></span><b>Huabu</b></div>
+    <div class="hero-copy">
+      <h1>一块无限大的画布，<br>装下你所有的灵感。</h1>
+      <p>输入想法，选中参考图，继续生成。每一张图都是下一张的起点。</p>
+    </div>
+    <div class="hero-orbs"><i></i><i></i><i></i></div>
+  </div>
+  <form class="auth-card" id="authForm" novalidate>
+    <div class="seg" id="authTabs">
+      <button type="button" data-mode="login" class="on">登录</button>
+      <button type="button" data-mode="register">注册</button>
+    </div>
+    <h2 id="authTitle">欢迎回来</h2>
+    <p class="sub" id="authSub">登录后继续你的创作</p>
+    <label class="field name-only" hidden><span>昵称</span><input name="name" autocomplete="nickname" placeholder="你的名字"></label>
+    <label class="field"><span>邮箱</span><input name="email" type="email" autocomplete="email" placeholder="name@example.com"></label>
+    <label class="field"><span>密码</span><input name="password" type="password" autocomplete="current-password" placeholder="至少 6 位"></label>
+    <div class="err" id="authErr" role="alert"></div>
+    <button class="btn primary lg" id="authSubmit" type="submit">登录</button>
+    <p class="fine" id="authFine">新用户注册即送 <b>100</b> 算力</p>
+  </form>
+</section>
+
+<!-- ============ 应用 ============ -->
+<div id="app" hidden>
+  <main id="stage" tabindex="0" aria-label="无限画布">
+    <div id="world">
+      <svg id="edges" width="1" height="1"></svg>
+      <div id="nodes"></div>
+    </div>
+    <div id="marquee" hidden></div>
+    <div id="empty">
+      <div class="empty-ico"><i data-i="sparkle" data-s="26"></i></div>
+      <h3>在下方输入想法，开始创作</h3>
+      <p>或把图片拖进来 · 双击画布添加便签</p>
+    </div>
+  </main>
+
+  <header class="top">
+    <div class="pill left">
+      <button class="icon-btn" id="btnProjects" title="我的项目"><i data-i="grid"></i></button>
+      <input id="projName" spellcheck="false" aria-label="项目名称" maxlength="40">
+      <span class="saved" id="saveState">已保存</span>
+    </div>
+    <div class="pill right">
+      <button class="icon-btn" id="btnUndo" title="撤销 (Ctrl+Z)"><i data-i="undo"></i></button>
+      <button class="icon-btn" id="btnRedo" title="重做 (Ctrl+Shift+Z)"><i data-i="redo"></i></button>
+      <span class="sep"></span>
+      <button class="icon-btn" id="btnTheme" title="切换主题"><i data-i="moon"></i></button>
+      <button class="icon-btn" id="btnHelp" title="快捷键"><i data-i="keyboard"></i></button>
+      <span class="sep"></span>
+      <button class="credits" id="btnCredits" title="充值 / 流水"><i data-i="coin" data-s="16"></i><b id="creditsNum">0</b></button>
+      <button class="avatar" id="btnUser" title="账号"></button>
+    </div>
+  </header>
+
+  <nav class="tools" aria-label="工具">
+    <button class="tool on" data-tool="select" title="选择 (V)"><i data-i="select"></i></button>
+    <button class="tool" data-tool="hand" title="抓手 (H / 空格)"><i data-i="hand"></i></button>
+    <button class="tool" data-tool="note" title="便签 (T)"><i data-i="text"></i></button>
+    <span class="hr"></span>
+    <button class="tool" id="btnUpload" title="上传图片 (Ctrl+U)"><i data-i="image"></i></button>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </nav>
+
+  <div class="zoombar pill">
+    <button class="icon-btn" id="zOut" title="缩小 (-)"><i data-i="minus" data-s="16"></i></button>
+    <button class="zval" id="zVal" title="重置为 100% (1)">100%</button>
+    <button class="icon-btn" id="zIn" title="放大 (+)"><i data-i="plus" data-s="16"></i></button>
+    <span class="sep"></span>
+    <button class="icon-btn" id="zFit" title="适应屏幕 (0)"><i data-i="fit" data-s="16"></i></button>
+  </div>
+
+  <canvas id="minimap" width="176" height="116" title="小地图"></canvas>
+
+  <section class="dock" id="dock">
+    <div class="refs" id="refs" hidden></div>
+    <textarea id="prompt" rows="1" placeholder="描述你想生成的画面…" spellcheck="false"></textarea>
+    <div class="dock-row">
+      <div class="opts">
+        <label class="sel"><i data-i="sparkle" data-s="15"></i><select id="selModel"></select></label>
+        <label class="sel"><select id="selRatio"></select></label>
+        <div class="stepper" title="一次生成的张数">
+          <button type="button" id="nDec">−</button><span id="nVal">1 张</span><button type="button" id="nInc">+</button>
+        </div>
+      </div>
+      <button class="btn primary go" id="btnGen"><i data-i="send" data-s="17"></i><span id="genLabel">生成</span><em id="genCost">2</em></button>
+    </div>
+  </section>
+</div>
+
+<div id="overlay"></div>
+<div id="toasts" aria-live="polite"></div>
+<div id="menu" hidden></div>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
