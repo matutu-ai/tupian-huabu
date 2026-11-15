@@ -1,3 +1,4 @@
+import { auth } from './auth.js';
 // Model registry + image generation adapters.
 
 export const RATIOS = {
@@ -13,7 +14,9 @@ const BUILTIN = [
 const KEY = 'huabu.models';
 export const customModels = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
 export const saveCustomModels = (l) => localStorage.setItem(KEY, JSON.stringify(l));
-export const listModels = () => [...BUILTIN, ...customModels().map((m) => ({ ...m, type: 'openai', desc: '自定义 API' }))];
+let remote = null; // server-side model list (keys never reach the browser)
+export const setRemoteModels = (l) => { remote = l ? l.map((m) => ({ ...m, type: 'remote' })) : null; };
+export const listModels = () => remote || [...BUILTIN, ...customModels().map((m) => ({ ...m, type: 'openai', desc: '自定义 API' }))];
 
 /* ---------- deterministic art for the demo models ---------- */
 function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
@@ -97,6 +100,7 @@ async function openaiGenerate(model, { prompt, ratio, refs, signal, seed }) {
 
 /** Generate ONE image. Resolves to a data URL (or remote URL if CORS blocks inlining). */
 export async function generateImage(model, opts) {
+  if (model.type === 'remote') return (await auth.generate({ model: model.id, prompt: opts.prompt, ratio: opts.ratio, refs: opts.refs })).src;
   if (model.type === 'mock') {
     await sleep(1400 + Math.random() * 1600, opts.signal);
     const [w, h] = RATIOS[opts.ratio] || RATIOS['1:1'];

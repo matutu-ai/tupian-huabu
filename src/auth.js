@@ -92,6 +92,8 @@ class RemoteAdapter {
   async spend(amount, note) { return (await this.req('/credits/spend', { amount, note })).credits; }
   async refund(amount, note) { return (await this.req('/credits/refund', { amount, note })).credits; }
   async checkout(packId) { const j = await this.req('/billing/checkout', { packId }); if (j.url) location.href = j.url; return j; }
+  async models() { return (await this.req('/models')).models; }
+  async generate(body) { return this.req('/generate', body); }
 }
 
 const cfg = window.HUABU_CONFIG || {};

@@ -1,0 +1,4 @@
+[
+  { "id": "aurora", "name": "Aurora", "desc": "演示模型 · 快速", "cost": 2, "type": "mock" },
+  { "id": "prism", "name": "Prism HD", "desc": "演示模型 · 高精", "cost": 4, "type": "mock" }
+]

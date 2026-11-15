@@ -43,7 +43,7 @@ src/app.js        画布引擎 + UI
 
 > **重要**：纯前端账号只能用于演示——余额存在浏览器里，用户自己可以改。真正收费时，登录、余额扣减、调用上游模型必须放在服务端，Key 也不能放浏览器。
 
-`RemoteAdapter` 预期接口（设置 `window.HUABU_CONFIG.apiBase` 即启用）：
+**已实现**于 `server/server.js`（`config.js` 被服务端覆盖为 `apiBase:"/api"` 即切换到服务端模式）。接口：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -55,7 +55,7 @@ src/app.js        画布引擎 + UI
 | POST | `/credits/refund` `{amount,note}` | 返回 `{credits}` |
 | POST | `/billing/checkout` `{packId}` | 返回 `{url}` 跳转支付 |
 
-最终形态应把 `spend` 合并进服务端的 `/generate` 代理（扣费与出图原子化）。
+另有 `GET /models`、`POST /generate`（服务端先扣费、调用上游、失败退还）、`POST /billing/webhook`（HMAC 签名、幂等入账）。服务端模式下前端不再自行扣费。
 
 ## 5. 验收清单
 

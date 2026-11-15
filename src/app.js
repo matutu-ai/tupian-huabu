@@ -1,7 +1,7 @@
 import { icon, hydrateIcons } from './icons.js';
 import { db } from './db.js';
 import { auth, PACKS, SIGNUP_BONUS } from './auth.js';
-import { RATIOS, listModels, customModels, saveCustomModels, generateImage, drawArt } from './providers.js';
+import { RATIOS, setRemoteModels, listModels, customModels, saveCustomModels, generateImage, drawArt } from './providers.js';
 
 /* ============================== helpers ============================== */
 const $ = (s, r = document) => r.querySelector(s);
@@ -292,7 +292,7 @@ function duplicate(list, off = 32) {
 function downloadNode(n) {
   if (!n.src) return;
   if (!n.src.startsWith('data:')) return void window.open(n.src, '_blank');
-  const a = document.createElement('a'); a.href = n.src; a.download = `huabu-${n.id}.${n.src.startsWith('data:image/png') ? 'png' : 'jpg'}`; a.click();
+  const a = document.createElement('a'); a.href = n.src; a.download = `huabu-${n.id}.${n.src.startsWith('data:image/png') ? 'png' : n.src.startsWith('data:image/svg') ? 'svg' : 'jpg'}`; a.click();
 }
 
 /* ---------- uploads ---------- */
@@ -336,8 +336,12 @@ function updateDock() {
 async function generate(o) {
   const prompt = (o.prompt || '').trim(); if (!prompt) { toast('先写点提示词吧'); $('#prompt').focus(); return; }
   const model = modelById(o.model), n = o.n, cost = model.cost * n, refs = o.refs;
-  try { user.credits = await auth.spend(cost, `生成 ${n} 张 · ${model.name}`); setCredits(); }
-  catch (e) { if (e.code === 'NO_CREDITS') { toast('算力不足，请先充值', 'err'); openRecharge(); } else toast(e.message, 'err'); return; }
+  const serverBilled = auth.kind === 'remote';   // server spends/refunds per image itself
+  if (user.credits < cost) { toast('算力不足，请先充值', 'err'); openRecharge(); return; }
+  if (!serverBilled) {
+    try { user.credits = await auth.spend(cost, `生成 ${n} 张 · ${model.name}`); setCredits(); }
+    catch (e) { if (e.code === 'NO_CREDITS') { toast('算力不足，请先充值', 'err'); openRecharge(); } else toast(e.message, 'err'); return; }
+  }
 
   snap();
   const { w, h } = sizeFor(o.ratio); const created = [];
@@ -361,8 +365,11 @@ async function generate(o) {
         if (cur) Object.assign(cur, { status: 'error', error: e.name === 'AbortError' ? '已取消' : e.message });
         if (e.name !== 'AbortError') toast('生成失败：' + e.message, 'err');
       }
-      try { user.credits = await auth.refund(model.cost, `生成失败退还 · ${model.name}`); setCredits(); } catch { /* ignore */ }
-    } finally { jobs.delete(node.id); render(); changed(); }
+      if (!serverBilled) try { user.credits = await auth.refund(model.cost, `生成失败退还 · ${model.name}`); setCredits(); } catch { /* ignore */ }
+    } finally {
+      jobs.delete(node.id); render(); changed();
+      if (serverBilled) auth.me().then((u) => { if (u && user) { user.credits = u.credits; setCredits(); } });
+    }
   }));
 }
 const submitDock = () => generate({ prompt: $('#prompt').value, model: dockState.model, ratio: dockState.ratio, n: dockState.n, refs: refNodes() });
@@ -516,7 +523,7 @@ function openModelPop() {
   };
   draw(); $('#mq').oninput = draw; $('#mq').focus();
   $('#mlist').onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; dockState.model = b.dataset.id; LS.set('huabu.dock', dockState); fillDockSelects(); updateDock(); closeModelPop(); };
-  $('#mManage').onclick = () => { closeModelPop(); openSettings('models'); };
+  if (auth.kind === 'remote') $('.foot', pop).remove(); else $('#mManage').onclick = () => { closeModelPop(); openSettings('models'); };
 }
 $('#modelBtn').onclick = () => ($('#mpop').hidden ? openModelPop() : closeModelPop());
 document.addEventListener('pointerdown', (e) => { if (!$('#mpop').hidden && !e.target.closest('#mpop') && !e.target.closest('#modelBtn')) closeModelPop(); }, true);
@@ -613,6 +620,7 @@ function openSettings(tab = 'pref') {
         l.push(m); saveCustomModels(l); fillDockSelects(); updateDock(); toast('已添加', 'ok'); models();
       };
     };
+    if (auth.kind === 'remote') { $('[data-t=models]', body).remove(); tab = 'pref'; }
     body.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x.dataset.t === tab)); tab === 'models' ? models() : pref();
     body.querySelectorAll('.tabs button').forEach((b) => (b.onclick = () => { body.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('on', x === b)); b.dataset.t === 'pref' ? pref() : models(); }));
   });
@@ -666,6 +674,7 @@ async function doLogout() {
 async function enterApp() {
   $('#auth').hidden = true; $('#app').hidden = false;
   $('#btnUser').textContent = (user.name || '?').slice(0, 1).toUpperCase(); setCredits();
+  if (auth.kind === 'remote') { try { setRemoteModels(await auth.models()); } catch { toast('模型列表加载失败', 'err'); } }
   fillDockSelects(); updateDock(); renderRecipes(); setTool('select'); setTheme(document.documentElement.dataset.theme);
   const list = (await db.byUser(user.id)).sort((a, b) => b.updated - a.updated);
   const last = LS.get('huabu.last.' + user.id); const pick = list.find((p) => p.id === last) || list[0];
