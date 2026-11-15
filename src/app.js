@@ -289,11 +289,51 @@ function duplicate(list, off = 32) {
   const idmap = new Map(); const copies = list.filter((n) => n.status !== 'loading').map((n) => { const c = { ...n, id: uid(), x: n.x + off, y: n.y + off, refs: undefined }; idmap.set(n.id, c.id); return c; });
   nodes.push(...copies); setSel(copies.map((c) => c.id)); changed();
 }
-function downloadNode(n) {
-  if (!n.src) return;
-  if (!n.src.startsWith('data:')) return void window.open(n.src, '_blank');
-  const a = document.createElement('a'); a.href = n.src; a.download = `huabu-${n.id}.${n.src.startsWith('data:image/png') ? 'png' : n.src.startsWith('data:image/svg') ? 'svg' : 'jpg'}`; a.click();
+/* ---------- download (always PNG, to the user's disk) ---------- */
+const slug = (t) => (t || '').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 24) || 'image';
+const asciiSlug = (t) => (t || '').replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'image'; // browser-save filenames: ASCII only, so the .png extension always survives
+async function nodeToPngBlob(n) {
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = n.src; });
+    const c = document.createElement('canvas'); c.width = img.naturalWidth || 1024; c.height = img.naturalHeight || 1024;
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const b = await new Promise((r) => c.toBlob(r, 'image/png')); if (b) return b;
+  } catch { /* fall through */ }
+  return (await fetch(n.src)).blob();                 // tainted canvas / CORS: save the original bytes
 }
+function saveBlob(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+const CRC = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[i] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function makeZip(files) { // store-only zip, enough for PNGs
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const { name, data } of files) {
+    const nm = enc.encode(name), crc = crc32(data), h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nm.length, true);
+    parts.push(h.buffer, nm, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(c.buffer, nm); off += 30 + nm.length + data.length;
+  }
+  const csize = central.reduce((a, b) => a + b.byteLength, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, e.buffer], { type: 'application/zip' });
+}
+async function downloadNodes(list) {
+  list = list.filter((n) => n.type === 'image' && n.status === 'done' && n.src);
+  if (!list.length) return toast('没有可下载的图片');
+  try {
+    if (list.length === 1) return saveBlob(await nodeToPngBlob(list[0]), `huabu-${asciiSlug(list[0].prompt)}-${list[0].id.slice(0, 4)}.png`);
+    toast(`正在打包 ${list.length} 张图片…`);
+    const files = [];
+    for (const [i, n] of list.entries()) files.push({ name: `${String(i + 1).padStart(2, '0')}-${slug(n.prompt)}.png`, data: new Uint8Array(await (await nodeToPngBlob(n)).arrayBuffer()) });
+    saveBlob(makeZip(files), `huabu-${asciiSlug(project.name)}-${list.length}.zip`);
+  } catch (e) { toast('下载失败：' + e.message, 'err'); }
+}
+const downloadNode = (n) => downloadNodes([n]);
+const downloadTargets = () => { const s = selNodes().filter((n) => n.type === 'image'); return s.length ? s : nodes.filter((n) => n.type === 'image'); };
 
 /* ---------- uploads ---------- */
 async function readImage(file) {
@@ -331,6 +371,7 @@ function updateDock() {
   const m = modelById(dockState.model);
   $('#genCost').textContent = m.cost * dockState.n; $('#nVal').textContent = dockState.n + ' 张';
   $('#genLabel').textContent = refs.length ? '参考生成' : '生成';
+  const dl = $('#btnDownload'); if (dl) dl.disabled = !nodes.some((x) => x.type === 'image' && x.status === 'done');
 }
 
 async function generate(o) {
@@ -482,6 +523,7 @@ document.addEventListener('keydown', (e) => {
   if (mod && k === 'a') { e.preventDefault(); return setSel(nodes.map((n) => n.id)); }
   if (mod && k === 'c') { clip = selNodes().filter((n) => n.status !== 'loading').map((n) => ({ ...n })); return; }
   if (mod && k === 'd') { e.preventDefault(); return duplicate(selNodes()); }
+  if (mod && k === 's') { e.preventDefault(); return downloadNodes(downloadTargets()); }
   if (mod && k === 'u') { e.preventDefault(); return $('#fileInput').click(); }
   if (mod) return;
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return deleteSel(); }
@@ -509,7 +551,7 @@ promptEl.addEventListener('keydown', (e) => {
 $('#btnGen').onclick = submitDock;
 function fillDockSelects() {
   const ms = listModels(); if (!ms.some((m) => m.id === dockState.model)) dockState.model = ms[0].id;
-  $('#modelName').textContent = modelById(dockState.model).name;
+  $('#modelName').textContent = modelById(dockState.model).name; $('#modelBtn').hidden = ms.length < 2;
   $('#selRatio').innerHTML = Object.keys(RATIOS).map((r) => `<option>${r}</option>`).join(''); $('#selRatio').value = dockState.ratio;
 }
 function closeModelPop() { $('#mpop').hidden = true; }
@@ -550,6 +592,7 @@ function renderRecipes() {
 }
 
 /* ============================== top bar ============================== */
+$('#btnDownload').onclick = () => downloadNodes(downloadTargets());
 $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo;
 $('#zIn').onclick = () => zoomCenter(1.25); $('#zOut').onclick = () => zoomCenter(0.8);
 $('#zVal').onclick = () => zoomCenter(1 / view.k); $('#zFit').onclick = () => fitTo(nodes);
@@ -564,10 +607,11 @@ $('#btnUser').setAttribute('data-menu', ''); $('#btnUser').onclick = (e) => {
   openMenu(e.currentTarget, `<div class="who"><b>${esc(user.name)}</b><span>${esc(user.email)}</span></div><div class="line"></div>
     <button class="it" data-k="credits">${icon('coin', 16)}算力与充值</button>
     <button class="it" data-k="settings">${icon('settings', 16)}设置与模型接入</button>
+    <button class="it" data-k="dlall">${icon('download', 16)}下载本画布全部图片 (zip)</button>
     <button class="it" data-k="export">${icon('file', 16)}导出项目 JSON</button>
     <button class="it" data-k="help">${icon('keyboard', 16)}快捷键</button><div class="line"></div>
     <button class="it d" data-k="logout">${icon('logout', 16)}退出登录</button>`,
-    (k) => ({ credits: openRecharge, settings: openSettings, help: openHelp, logout: doLogout,
+    (k) => ({ dlall: () => downloadNodes(nodes), credits: openRecharge, settings: openSettings, help: openHelp, logout: doLogout,
       export: () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify({ name: project.name, view, nodes }, null, 1)], { type: 'application/json' })); a.download = project.name + '.huabu.json'; a.click(); } })[k]());
 };
 $('#btnCredits').onclick = () => openRecharge();
@@ -575,7 +619,7 @@ $('#btnProjects').onclick = () => openProjects();
 
 /* ============================== modals ============================== */
 function openHelp() {
-  const rows = [['选择 / 抓手 / 便签', 'V / H / T'], ['临时抓手', '按住 空格'], ['缩放', '滚轮 / Ctrl+滚轮'], ['适应屏幕', '0'], ['100%', '1'], ['撤销 / 重做', 'Ctrl+Z / ⇧Z'], ['复制 / 粘贴', 'Ctrl+C / V'], ['创建副本', 'Ctrl+D'], ['全选', 'Ctrl+A'], ['删除', 'Delete'], ['微调位置', '方向键'], ['聚焦提示词', '/ 或 Enter'], ['上传图片', 'Ctrl+U'], ['双击画布', '新建便签']];
+  const rows = [['选择 / 抓手 / 便签', 'V / H / T'], ['临时抓手', '按住 空格'], ['缩放', '滚轮 / Ctrl+滚轮'], ['适应屏幕', '0'], ['100%', '1'], ['撤销 / 重做', 'Ctrl+Z / ⇧Z'], ['复制 / 粘贴', 'Ctrl+C / V'], ['创建副本', 'Ctrl+D'], ['全选', 'Ctrl+A'], ['删除', 'Delete'], ['微调位置', '方向键'], ['聚焦提示词', '/ 或 Enter'], ['上传图片', 'Ctrl+U'], ['下载所选 / 全部', 'Ctrl+S'], ['双击画布', '新建便签']];
   openModal('快捷键', `<div class="keys">${rows.map(([a, b]) => `<div><span>${a}</span><kbd>${b}</kbd></div>`).join('')}</div>`);
 }
 

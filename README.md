@@ -13,14 +13,17 @@ ALLOW_DEMO_TOPUP=1 node server/server.js     # http://localhost:8000 （ALLOW_DE
 ```
 服务端同时托管前端；余额与扣费都在服务端 SQLite 里，用户改不了。
 
-## 接真实模型（服务端，Key 不进浏览器）
-编辑 `server/models.json`，例如：
+## 接你的生成模型（服务端，Key 不进浏览器）
+只提供一个模型时：`server/models.json` 里只留一项，前端会自动隐藏模型选择器。把默认的 `mock` 条目替换成你的，例如：
 ```json
 { "id": "gpt-image", "name": "GPT Image", "desc": "OpenAI", "cost": 8,
   "type": "openai", "baseUrl": "https://api.openai.com/v1", "model": "gpt-image-1", "apiKeyEnv": "OPENAI_KEY" }
 ```
 然后 `OPENAI_KEY=sk-... node server/server.js`。`cost` 就是每张收取的算力，定价自行决定。
 （演示模式下也可在 设置 → 模型接入 里填 Key，仅限个人调试。）
+
+## 下载
+生成的图片可一键保存到用户本地（统一转为 PNG）：图片上方工具栏「下载」、顶栏下载按钮或 `Ctrl+S`（选中几张下几张，没选则下载全部；多张自动打包为 zip），也可在头像菜单「下载本画布全部图片」。
 
 ## 收费
 - 套餐在 `server/server.js` 的 `PACKS` 与 `src/auth.js` 的 `PACKS`（两处保持一致）。
